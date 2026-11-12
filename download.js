@@ -17,6 +17,7 @@
   let manifest = null;
   let manifestPromise;
   let retryNeedsMetadata = false;
+  let preferBrowserSave = false;
 
   function formatBytes(bytes) {
     if (bytes < 1024) return `${bytes.toLocaleString('zh-CN')} B`;
@@ -162,6 +163,19 @@
     if (!readyBlob) return;
     phase = 'saving';
     setButton('正在保存…', true);
+    if (preferBrowserSave) {
+      // A fresh user click invokes the same visible native link that works in restricted browsers.
+      try {
+        byId('nativeLink').click();
+        setStatus('已请求浏览器直接下载，请在下载列表确认。网页无法确认文件已写入设备。');
+        setButton('再次使用浏览器下载');
+      } catch {
+        setStatus('未能启动浏览器下载。请点击下方“浏览器直接下载”链接。', 'error');
+        setButton('使用浏览器下载');
+      }
+      phase = 'ready';
+      return;
+    }
     if (window.isSecureContext && typeof window.showSaveFilePicker === 'function') {
       let writable;
       try {
@@ -178,9 +192,17 @@
         setButton('另存一份');
       } catch (error) {
         if (writable) { try { await writable.abort(); } catch { /* Preserve the original error. */ } }
-        if (error.name === 'AbortError') setStatus('已取消保存。文件仍已准备好，可再次点击保存。');
-        else setStatus('保存未完成。请重试，或使用“浏览器直接下载”并在下载列表确认。', 'error');
-        setButton('保存演示文稿');
+        if (error.name === 'AbortError') {
+          setStatus('已取消保存。文件仍已准备好，可再次点击保存。');
+          setButton('保存演示文稿');
+        } else {
+          // Do not repeat a picker that exists but cannot be used in this environment.
+          // Wait for another explicit click; cancellation never starts a fallback download.
+          preferBrowserSave = true;
+          const unavailable = ['SecurityError', 'NotAllowedError', 'NotSupportedError'].includes(error.name);
+          setStatus(`${unavailable ? '当前环境无法使用系统保存。' : '保存未完成。'}文件仍已准备好，可点击“使用浏览器下载”，或使用下方直接下载链接。`, 'error');
+          setButton('使用浏览器下载');
+        }
       } finally {
         phase = 'ready';
       }
